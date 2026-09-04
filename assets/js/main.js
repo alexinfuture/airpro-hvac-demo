@@ -4,6 +4,9 @@
 
   var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  /* JS is running, so the entrance states are safe to apply */
+  document.documentElement.classList.add('js');
+
   /* ---------- footer year ---------- */
   var yr = document.getElementById('yr');
   if (yr) yr.textContent = String(new Date().getFullYear());
@@ -37,27 +40,39 @@
   }
   if (!reduced) splitHeadings();
 
-  /* ---------- entrance reveals ---------- */
-  var revealTargets = document.querySelectorAll('[data-reveal], [data-split], .work__item, .years__shot');
+  /* ---------- entrance reveals ----------
+     Rect based rather than IntersectionObserver: the hidden state of the wipe,
+     frame and bleed reveals is a clip-path, which zeroes the element's
+     intersection rect, so an observer would never fire on them. */
+  var pending = [];
+  var nodes = document.querySelectorAll('[data-reveal], [data-split], .work__item, .years__shot');
+  for (var r = 0; r < nodes.length; r++) {
+    if (reduced) { nodes[r].classList.add('is-in'); } else { pending.push(nodes[r]); }
+  }
 
-  if ('IntersectionObserver' in window && !reduced) {
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (entry) {
-        if (!entry.isIntersecting) return;
-        var el = entry.target;
-        var delay = parseInt(el.getAttribute('data-delay') || '0', 10);
-        window.setTimeout(function () { el.classList.add('is-in'); }, delay);
-        io.unobserve(el);
-      });
-    }, { rootMargin: '0px 0px -12% 0px', threshold: 0.12 });
+  function showIn(el) {
+    var delay = parseInt(el.getAttribute('data-delay') || '0', 10);
+    if (!delay) { el.classList.add('is-in'); return; }
+    window.setTimeout(function () { el.classList.add('is-in'); }, delay);
+  }
 
-    for (var r = 0; r < revealTargets.length; r++) io.observe(revealTargets[r]);
-  } else {
-    for (var q = 0; q < revealTargets.length; q++) revealTargets[q].classList.add('is-in');
+  function revealPass() {
+    var vh = window.innerHeight;
+    for (var i = pending.length - 1; i >= 0; i--) {
+      var el = pending[i];
+      var box = el.getBoundingClientRect();
+      if (box.top < vh * 0.88 && box.bottom > 0) {
+        pending.splice(i, 1);
+        showIn(el);
+      }
+    }
   }
 
   /* ---------- counter ---------- */
   var counters = document.querySelectorAll('[data-count]');
+  var countsPending = [];
+  for (var cq = 0; cq < counters.length; cq++) countsPending.push(counters[cq]);
+
   function runCount(el) {
     var target = parseInt(el.getAttribute('data-count'), 10);
     if (reduced) { el.textContent = String(target); return; }
@@ -72,17 +87,16 @@
     }
     window.requestAnimationFrame(step);
   }
-  if ('IntersectionObserver' in window) {
-    var cio = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (!e.isIntersecting) return;
-        runCount(e.target);
-        cio.unobserve(e.target);
-      });
-    }, { threshold: 0.5 });
-    for (var n = 0; n < counters.length; n++) cio.observe(counters[n]);
-  } else {
-    for (var m = 0; m < counters.length; m++) runCount(counters[m]);
+  function countPass() {
+    var vh = window.innerHeight;
+    for (var i = countsPending.length - 1; i >= 0; i--) {
+      var el = countsPending[i];
+      var box = el.getBoundingClientRect();
+      if (box.top < vh * 0.8 && box.bottom > 0) {
+        countsPending.splice(i, 1);
+        runCount(el);
+      }
+    }
   }
 
   /* ---------- scroll driven: meter, masthead, parallax, nav state ---------- */
@@ -102,6 +116,9 @@
   function onScroll() {
     var y = window.pageYOffset || document.documentElement.scrollTop;
     var docH = document.documentElement.scrollHeight - window.innerHeight;
+
+    revealPass();
+    countPass();
 
     if (meter) meter.style.width = (docH > 0 ? (y / docH) * 100 : 0) + '%';
     if (masthead) masthead.classList.toggle('is-stuck', y > 40);
@@ -132,6 +149,11 @@
   }
   window.addEventListener('scroll', requestScroll, { passive: true });
   window.addEventListener('resize', requestScroll);
+  window.addEventListener('orientationchange', requestScroll);
+  window.addEventListener('load', requestScroll);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(requestScroll);
+  window.setTimeout(requestScroll, 300);
+  window.setTimeout(requestScroll, 1200);
   onScroll();
 
   /* ---------- mobile drawer ---------- */
